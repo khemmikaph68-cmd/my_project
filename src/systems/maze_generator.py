@@ -2,13 +2,14 @@ import random
 from config import DIRS
 
 class MazeGenerator:
-    """สร้างเขาวงกตด้วยวิธี Recursive Backtracker + เจาะรูเพิ่มเพื่อลบล้างทางตัน"""
+    """สร้างเขาวงกตและเจาะรูเพิ่มเพื่อลบล้างทางตัน"""
     def __init__(self, width, height):
         self.width = width
         self.height = height
         self.grid = [[1 for _ in range(self.width)] for _ in range(self.height)]
         self._generate()
         self._remove_dead_ends()
+        # ไม่ต้องเจาะขอบกำแพงแล้ว
 
     def _generate(self):
         stack = [(1, 1)]
@@ -33,7 +34,6 @@ class MazeGenerator:
                 stack.pop()
 
     def _remove_dead_ends(self):
-        """เจาะกำแพงบางส่วนออกเพื่อเชื่อมทาง"""
         for y in range(1, self.height - 1):
             for x in range(1, self.width - 1):
                 if self.grid[y][x] == 0:
@@ -48,9 +48,19 @@ class MazeGenerator:
                                     possible_drill.append((dx, dy))
 
                     if walls_around >= 3 and possible_drill:
-                        if random.random() < 0.6:  # โอกาส 60%
+                        if random.random() < 0.95: 
                             dx, dy = random.choice(possible_drill)
                             self.grid[y + dy][x + dx] = 0
+
+        extra_holes = (self.width * self.height) // 15
+        for _ in range(extra_holes):
+            x = random.randint(1, self.width - 2)
+            y = random.randint(1, self.height - 2)
+            if self.grid[y][x] == 1:
+                if self.grid[y][x-1] == 0 and self.grid[y][x+1] == 0:
+                    self.grid[y][x] = 0
+                elif self.grid[y-1][x] == 0 and self.grid[y+1][x] == 0:
+                    self.grid[y][x] = 0
 
     def is_wall(self, x, y):
         if x < 0 or x >= self.width or y < 0 or y >= self.height:

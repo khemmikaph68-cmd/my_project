@@ -4,45 +4,86 @@ import sys
 from config import *
 from src.systems.maze_generator import MazeGenerator
 from src.entities.player import Player
-from src.entities.enemy import AStarEnemy
-from src.entities.projectile import MagicProjectile
+from src.entities.enemy import Enemy
 
 class Game:
     def __init__(self, screen):
         self.screen = screen
         self.clock = pygame.time.Clock()
         
-        # เพิ่มฟอนต์สำหรับหน้า Title โดยเฉพาะให้ใหญ่และหนาขึ้น
         self.title_font = pygame.font.SysFont('Tahoma', 64, bold=True)
         self.font = pygame.font.SysFont('Tahoma', 36)
         self.small_font = pygame.font.SysFont('Tahoma', 20)
         self.running = True
         
+        self.level = 1
+        self.start_btn_rect = pygame.Rect(SCREEN_WIDTH//2 - 100, SCREEN_HEIGHT//2 + 20, 200, 50)
+        self.state = "START"
         self.reset_game()
-        
-        # บังคับให้เริ่มเปิดเกมมาอยู่ที่หน้า START
-        self.state = "START" 
+        self.state = "START"
 
-    def reset_game(self):
+    def get_random_empty_cell(self):
+        while True:
+            x = random.randint(1, MAZE_WIDTH - 2)
+            y = random.randint(1, MAZE_HEIGHT - 2)
+            # ป้องกันไม่ให้เหรียญ/ไอเทม/ปีศาจ ไปเกิดทับบนประตูมิติ
+            invalid_pos = [self.portal_1, self.portal_2]
+            if not self.maze.is_wall(x, y) and (x, y) not in invalid_pos:
+                return x, y
+
+    def reset_game(self, reset_level=False):
+        if reset_level:
+            self.level = 1
+            
         self.maze = MazeGenerator(MAZE_WIDTH, MAZE_HEIGHT)
         self.player = Player(1, 1)
         
-        self.trophy_x = MAZE_WIDTH - 2
-        self.trophy_y = MAZE_HEIGHT - 2
-        self.maze.grid[self.trophy_y][self.trophy_x] = 0
-        self.maze.grid[self.trophy_y-1][self.trophy_x] = 0
-        self.maze.grid[self.trophy_y][self.trophy_x-1] = 0
-
-        ex, ey = MAZE_WIDTH // 2, MAZE_HEIGHT // 2
-        while self.maze.is_wall(ex, ey) or (ex <= 8 and ey <= 8):
-            ex = random.randint(MAZE_WIDTH // 2, MAZE_WIDTH - 2)
-            ey = random.randint(MAZE_HEIGHT // 2, MAZE_HEIGHT - 2)
-            
-        self.enemy = AStarEnemy(ex, ey, self.maze)
-        self.projectiles = []
+        # ตั้งค่าตำแหน่งประตูมิติ (มุมซ้ายบน และ ขวาล่าง)
+        self.portal_1 = (1, 1)
+        self.portal_2 = (MAZE_WIDTH - 2, MAZE_HEIGHT - 2)
+        # ให้ cooldown เริ่มต้นที่ 1 วินาที เพื่อกันไม่ให้เริ่มเกมปุ๊บวาร์ปปั๊บ
+        self.teleport_cooldown = 1.0 
         
-        self.skill_cooldown = 5.0 
-        self.current_cooldown = 0.0
+        self.coins = []
+        for _ in range(3):
+            cx, cy = self.get_random_empty_cell()
+            while (cx, cy) in self.coins:
+                cx, cy = self.get_random_empty_cell()
+            self.coins.append((cx, cy))
+
+        self.ghost_item = None
+        if self.level >= 3:
+            gx, gy = self.get_random_empty_cell()
+            while (gx, gy) in self.coins:
+                gx, gy = self.get_random_empty_cell()
+            self.ghost_item = (gx, gy)
+
+        self.enemies = []
+        num_astar = 0
+        num_random = 0
+        
+        if self.level in [1, 2]:
+            num_astar, num_random = 1, 0
+        elif self.level in [3, 4]:
+            num_astar, num_random = 1, 1
+        elif self.level in [5, 6]:
+            num_astar, num_random = 2, 1
+        else:
+            num_astar, num_random = 2, 2
+            
+        ai_list = ["A*"] * num_astar + ["RANDOM"] * num_random
+        new_delay = max(0.15, 0.4 - (self.level * 0.02))
+
+        for ai in ai_list:
+            ex, ey = self.get_random_empty_cell()
+            while ex <= 10 and ey <= 10:
+                ex, ey = self.get_random_empty_cell()
+                
+            enemy = Enemy(ex, ey, self.maze, ai_type=ai)
+            enemy.base_delay = new_delay
+            enemy.timer = new_delay
+            self.enemies.append(enemy)
+            
         self.state = "PLAYING"
 
     def handle_events(self):
@@ -52,11 +93,15 @@ class Game:
                 pygame.quit()
                 sys.exit()
 
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.state == "START":
+                    if event.button == 1 and self.start_btn_rect.collidepoint(event.pos):
+                        self.reset_game(reset_level=False)
+
             if event.type == pygame.KEYDOWN:
-                # ถ้าอยู่หน้า START ให้กด SPACE หรือ ENTER เพื่อเริ่มเกม
                 if self.state == "START":
                     if event.key in (pygame.K_SPACE, pygame.K_RETURN):
-                        self.reset_game()
+                        self.reset_game(reset_level=False)
                 
                 elif self.state == "PLAYING":
                     dx, dy = 0, 0
@@ -70,66 +115,74 @@ class Game:
                         
                 elif self.state in ["WIN", "LOSE"]:
                     if event.key == pygame.K_r:
-                        self.reset_game()
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if self.state == "PLAYING" and event.button == 1: 
-                    if self.current_cooldown <= 0:
-                        mx, my = pygame.mouse.get_pos()
-                        target_grid_x = mx // TILE_SIZE
-                        target_grid_y = my // TILE_SIZE
-                        self.projectiles.append(MagicProjectile(self.player.x, self.player.y, target_grid_x, target_grid_y))
-                        self.current_cooldown = self.skill_cooldown
+                        if self.state == "LOSE":
+                            self.reset_game(reset_level=False)
+                            self.state = "START"
+                        else:
+                            self.level += 1
+                            self.reset_game(reset_level=False)
 
     def update_logic(self, dt):
         if self.state == "PLAYING":
-            if self.current_cooldown > 0:
-                self.current_cooldown -= dt
+            self.player.update(dt)
 
-            self.enemy.update(dt, self.player.x, self.player.y)
-
-            enemy_rect = pygame.Rect(self.enemy.x * TILE_SIZE, self.enemy.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
-            for p in self.projectiles:
-                p.update(dt, self.maze)
-                if p.active and p.get_rect().colliderect(enemy_rect):
-                    p.active = False
-                    self.enemy.apply_slow(4.0)
-
-            self.projectiles = [p for p in self.projectiles if p.active]
-
-            if self.player.x == self.trophy_x and self.player.y == self.trophy_y:
-                self.state = "WIN"
-            if self.player.x == self.enemy.x and self.player.y == self.enemy.y:
+            if not self.player.is_ghost and self.maze.is_wall(self.player.x, self.player.y):
                 self.state = "LOSE"
+                return
+
+            # --- ระบบวาร์ปด้วยประตูมิติ ---
+            if self.teleport_cooldown > 0:
+                self.teleport_cooldown -= dt
+            else:
+                if (self.player.x, self.player.y) == self.portal_1:
+                    self.player.x, self.player.y = self.portal_2
+                    self.teleport_cooldown = 1.0 # หน่วงเวลา 1 วิกันวาร์ปกลับไปกลับมารัวๆ
+                elif (self.player.x, self.player.y) == self.portal_2:
+                    self.player.x, self.player.y = self.portal_1
+                    self.teleport_cooldown = 1.0
+
+            for enemy in self.enemies:
+                enemy.update(dt, self.player.x, self.player.y)
+                if self.player.x == enemy.x and self.player.y == enemy.y:
+                    self.state = "LOSE"
+
+            if (self.player.x, self.player.y) in self.coins:
+                self.coins.remove((self.player.x, self.player.y))
+                
+            if self.ghost_item and (self.player.x, self.player.y) == self.ghost_item:
+                self.player.is_ghost = True
+                self.player.ghost_timer = 4.0
+                self.ghost_item = None
+            
+            if len(self.coins) == 0:
+                self.state = "WIN"
 
     def draw(self):
         self.screen.fill(COLOR_WALL)
         
-        # --- วาดหน้าจอ START ---
         if self.state == "START":
-            # ตกแต่งพื้นหลังนิดหน่อยให้ดูเป็นตาราง (Grid)
             for x in range(0, SCREEN_WIDTH, TILE_SIZE * 2):
                 pygame.draw.line(self.screen, (50, 50, 50), (x, 0), (x, SCREEN_HEIGHT))
             for y in range(0, SCREEN_HEIGHT, TILE_SIZE * 2):
                 pygame.draw.line(self.screen, (50, 50, 50), (0, y), (SCREEN_WIDTH, y))
 
-            # ชื่อเกม
             title = self.title_font.render("MAZE OF TERROR", True, COLOR_ENEMY)
-            title_rect = title.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//3))
+            title_rect = title.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//3 - 30))
             self.screen.blit(title, title_rect)
             
-            # คำอธิบาย
-            desc = self.small_font.render("Find the trophy. Avoid the red monster. Click to cast Slow Magic.", True, COLOR_PATH)
-            desc_rect = desc.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 20))
+            level_text = self.font.render(f"Current Level: {self.level}", True, COLOR_TROPHY)
+            level_rect = level_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//3 + 40))
+            self.screen.blit(level_text, level_rect)
+
+            pygame.draw.rect(self.screen, COLOR_PLAYER, self.start_btn_rect, border_radius=10)
+            start_text = self.font.render("START", True, COLOR_TEXT)
+            start_text_rect = start_text.get_rect(center=self.start_btn_rect.center)
+            self.screen.blit(start_text, start_text_rect)
+
+            desc = self.small_font.render("Collect 3 coins. Use portals. Lvl 3+ has Ghost Orb.", True, COLOR_PATH)
+            desc_rect = desc.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT - 30))
             self.screen.blit(desc, desc_rect)
 
-            # ตัวหนังสือกระพริบ "Press SPACE to Start"
-            if pygame.time.get_ticks() % 1000 < 500:  # กระพริบทุกๆ 0.5 วินาที
-                blink_text = self.font.render("Press SPACE to Start", True, COLOR_TROPHY)
-                blink_rect = blink_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 80))
-                self.screen.blit(blink_text, blink_rect)
-
-        # --- วาดหน้าจอตอนเล่น และจบเกม ---
         else:
             for y in range(MAZE_HEIGHT):
                 for x in range(MAZE_WIDTH):
@@ -137,19 +190,33 @@ class Game:
                         rect = (x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
                         pygame.draw.rect(self.screen, COLOR_PATH, rect)
 
-            center = (self.trophy_x * TILE_SIZE + TILE_SIZE//2, self.trophy_y * TILE_SIZE + TILE_SIZE//2)
-            pygame.draw.circle(self.screen, COLOR_TROPHY, center, TILE_SIZE//3)
+            # วาดประตูมิติ (วาดก่อนตัวละครเพื่อให้อยู่ที่พื้น)
+            for px, py in [self.portal_1, self.portal_2]:
+                center = (px * TILE_SIZE + TILE_SIZE//2, py * TILE_SIZE + TILE_SIZE//2)
+                # วงนอกสีฟ้าเข้ม
+                pygame.draw.circle(self.screen, (0, 100, 255), center, TILE_SIZE//2 - 2)
+                # วงในสีฟ้าสว่างให้ดูเรืองแสง
+                pygame.draw.circle(self.screen, (150, 255, 255), center, TILE_SIZE//4)
+
+            for cx, cy in self.coins:
+                center = (cx * TILE_SIZE + TILE_SIZE//2, cy * TILE_SIZE + TILE_SIZE//2)
+                pygame.draw.circle(self.screen, COLOR_TROPHY, center, TILE_SIZE//3)
+                
+            if self.ghost_item:
+                gx, gy = self.ghost_item
+                center = (gx * TILE_SIZE + TILE_SIZE//2, gy * TILE_SIZE + TILE_SIZE//2)
+                pygame.draw.circle(self.screen, (0, 255, 255), center, TILE_SIZE//4) # ใช้สีฟ้าเขียวแทน
             
             self.player.draw(self.screen)
-            self.enemy.draw(self.screen)
-            for p in self.projectiles:
-                p.draw(self.screen)
+            for enemy in self.enemies:
+                enemy.draw(self.screen)
 
-            cd_ratio = max(0, 1 - (self.current_cooldown / self.skill_cooldown))
-            pygame.draw.rect(self.screen, (100, 100, 100), (10, 10, 150, 15))
-            pygame.draw.rect(self.screen, COLOR_SKILL, (10, 10, int(150 * cd_ratio), 15))
-            text = self.small_font.render("Skill", True, COLOR_TEXT)
-            self.screen.blit(text, (10, 30))
+            ui_text = self.small_font.render(f"Level: {self.level} | Coins: {3 - len(self.coins)}/3", True, COLOR_BG)
+            self.screen.blit(ui_text, (10, 10))
+            
+            if self.player.is_ghost:
+                ghost_txt = self.small_font.render(f"GHOST: {self.player.ghost_timer:.1f}s", True, (0, 255, 255))
+                self.screen.blit(ghost_txt, (SCREEN_WIDTH - 150, 10))
 
             if self.state in ["WIN", "LOSE"]:
                 overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -157,14 +224,20 @@ class Game:
                 overlay.fill(COLOR_BG)
                 self.screen.blit(overlay, (0, 0))
 
-                msg = "YOU ESCAPED! (Win!)" if self.state == "WIN" else "WASTED! (Game Over)"
-                color = COLOR_TROPHY if self.state == "WIN" else COLOR_ENEMY
+                if self.state == "WIN":
+                    msg = f"LEVEL {self.level} CLEARED!"
+                    color = COLOR_TROPHY
+                    btn_msg = "Press 'R' for Next Level"
+                else:
+                    msg = "WASTED! (Game Over)"
+                    color = COLOR_ENEMY
+                    btn_msg = f"Press 'R' to retry Level {self.level}"
                 
                 text = self.font.render(msg, True, color)
                 rect = text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 20))
                 self.screen.blit(text, rect)
 
-                btn = self.small_font.render("Press 'R' to play again", True, COLOR_TEXT)
+                btn = self.small_font.render(btn_msg, True, COLOR_TEXT)
                 b_rect = btn.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30))
                 self.screen.blit(btn, b_rect)
 
