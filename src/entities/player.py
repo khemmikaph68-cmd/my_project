@@ -1,24 +1,19 @@
 import pygame
-from config import GREEN, PLAYER_SPEED
-from .base import Entity
+from config import TILE_SIZE, COLOR_PLAYER, COLOR_BG
 
-class Player(Entity):
+class Player:
     def __init__(self, x, y):
-        super().__init__(x, y, 30, 30, GREEN)
-        self.set_speed(PLAYER_SPEED)
+        self.x = x
+        self.y = y
 
-    def update(self, keys, maze):
-        # Polymorphism: การทำงานของ update เปลี่ยนแปลงไปเป็นของ Player
-        speed = self.get_speed()
-        dx = 0
-        dy = 0
-        if keys[pygame.K_LEFT]:
-            dx = -speed
-        if keys[pygame.K_RIGHT]:
-            dx = speed
-        if keys[pygame.K_UP]:
-            dy = -speed
-        if keys[pygame.K_DOWN]:
-            dy = speed
-        if dx != 0 or dy != 0:
-            self.move(dx, dy, maze)
+    def move(self, dx, dy, maze):
+        nx = self.x + dx
+        ny = self.y + dy
+        if not maze.is_wall(nx, ny):
+            self.x, self.y = nx, ny
+
+    def draw(self, surface):
+        p_rect = (self.x * TILE_SIZE, self.y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        pygame.draw.rect(surface, COLOR_PLAYER, p_rect)
+        pygame.draw.circle(surface, COLOR_BG, (self.x * TILE_SIZE + 10, self.y * TILE_SIZE + 10), 3)
+        pygame.draw.circle(surface, COLOR_BG, (self.x * TILE_SIZE + 20, self.y * TILE_SIZE + 10), 3)
