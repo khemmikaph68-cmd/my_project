@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my_game"
+version = "0.1.0"
+description = "A Pygame project demonstrating OOP and SOLID principles"
+authors = [
+    {name = "Your Team Name", email = "contact@example.com"}
+]
+dependencies = [
+    "pygame>=2.1.2"
+]
